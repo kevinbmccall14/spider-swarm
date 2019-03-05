@@ -11,8 +11,8 @@ import scrapy
 class BasicCrawlerItem(scrapy.Item):
     # define the fields for your item here like:
     # name = scrapy.Field()
-    title = scrapy.Field()
+    text = scrapy.Field()
     # email = scrapy.Field()
     # comments = scrapy.Field()
     # form = scrapy.Field()
-    location_url = scrapy.Field()
+    url = scrapy.Field()

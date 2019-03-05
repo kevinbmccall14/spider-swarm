@@ -1,61 +1,40 @@
-from scrapy.spiders import BaseSpider
-from scrapy.selector import Selector
-from basic_crawler.items import BasicCrawlerItem
-from scrapy.http import Request
-import re
+import scrapy
+from scrapy import Request
+from redis import Redis
+import json
 
-
-class MySpider(BaseSpider):
+class MySpider(scrapy.Spider):
   name = "basic_crawler"
-  allowed_domains = ['sfbay.craigslist.org/']
+  allowed_domains = ['sfbay.craigslist.org']
   start_urls = ["https://sfbay.craigslist.org/search/jjj?query=software+engineer"]
 
   def parse(self, response):
-    hxs = Selector(response)
+    jobs = response.xpath('//p[@class="result-info"]')
 
-    #CODE for scraping book titles
-    titles = response.xpath('//a[@class="result-title hdrlnk"]/text()').extract()
-    for title in titles:
-      job = BasicCrawlerItem()
-      job["title"] = title
-      job["location_url"] = response.url
-      yield job
+    for job in jobs:
+      relative_url = job.xpath('a/@href').extract_first()
+      absolute_url = response.urljoin(relative_url)
+      title = job.xpath('a/text()').extract_first()
+      address = job.xpath('span[@class="result-meta"]/span[@class="result-hood"]/text()').extract_first("")[2:-1]
+      yield Request(absolute_url, callback=self.parse_page, meta={'URL': absolute_url, 'Title': title, 'Address': address})
 
+    relative_next_url = response.xpath('//a[@class="button next"]/@href').extract_first()
+    absolute_next_url = "https://sfbay.craigslist.org" + relative_next_url
 
-    # #CODE for scraping Forms
-    # forms = hxs.xpath('//form/@action').extract()
-    # for form in forms:
-    #   formy = BasicCrawlerItem()
-    #   formy["form"] = form
-    #   formy["location_url"] = response.url
-    #   yield formy
+    yield Request(absolute_next_url, callback=self.parse)
 
-    # #CODE for scraping emails
-    # emails = hxs.xpath("//*[contains(text(),'@')]").extract()
-    # for email in emails:
-    #   com = BasicCrawlerItem()
-    #   com["email"] = email
-    #   com["location_url"] = response.url
-    #   yield com
+  def parse_page(self, response):
+    url = response.meta.get('URL')
+    title = response.meta.get('Title')
+    address = response.meta.get('Address')
+    description = "".join(line for line in response.xpath('//*[@id="postingbody"]/text()').extract())
 
+    compensation = response.xpath('//p[@class="attrgroup"]/span[1]/b/text()').extract_first()
+    employment_type = response.xpath('//p[@class="attrgroup"]/span[2]/b/text()').extract_first()
 
-    # #CODE for scraping comments
-    # comments = hxs.xpath('//comment()').extract()
-    # for comment in comments:
-    #   com = BasicCrawlerItem()
-    #   com["comments"] = comment
-    #   com["location_url"] = response.url
-    #   yield com
+    data = {'URL': url, 'Title': title, 'Address':address, 'Description':description, 'Compensation':compensation, 'Employment Type':employment_type}
 
-    # visited_links=[]
-    # links = hxs.xpath('//a/@href').extract()
-  #               link_validator= re.compile("^(?:http|https):\/\/(?:[\w\.\-\+]+:{0,1}[\w\.\-\+]*@)?(?:[a-z0-9\-\.]+)(?::[0-9]+)?(?:\/|\/(?:[\w#!:\.\?\+=&amp;%@!\-\/\(\)]+)|\?(?:[\w#!:\.\?\+=&amp;%@!\-\/\(\)]+))?$")
+    cache = Redis(host="redis", db=0, socket_timeout=5)
+    cache.rpush(url, json.dumps(data))
 
-    # for link in links:
-    #   if link_validator.match(link) and not link in visited_links:
-    #     visited_links.append(link)
-    #     yield Request(link, self.parse)
-    #   else:
-    #     full_url=response.urljoin(link)
-    #     visited_links.append(full_url)
-    #     yield Request(full_url, self.parse)
+    yield data
